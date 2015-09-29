@@ -184,6 +184,17 @@ namespace DumbCrawler
                         var matches = parsed.DocumentNode.SelectNodes("//a")
                             .Where(node => node != null)
                             .Select(node => node.GetAttributeValue("href", ""))
+                            .Select(s =>
+                            {
+                                if (s.StartsWith("/"))
+                                {
+                                    return $"{actualUrl.Scheme}://{actualUrl.Host}{s}";
+                                }
+                                else
+                                {
+                                    return s;
+                                }
+                            })
                             .Where(s => !string.IsNullOrEmpty(s) && (s.StartsWith("http") || s.StartsWith("https")) && _isUri.IsMatch(s));
 
                         return matches;
