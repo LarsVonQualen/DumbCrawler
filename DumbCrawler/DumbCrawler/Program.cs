@@ -1,10 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Net;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
+using System.Timers;
 
 namespace DumbCrawler
 {
@@ -14,52 +12,69 @@ namespace DumbCrawler
         {
             try
             {
-                var app = new Application();
+                var errors = new List<ErrorEventArgs>();
+                var timer = new Timer(1000);
+                var database = new Database();
+                Uri lastUri = new Uri("http://www.example.com");
+                long lastEnqueueCount = 0;
 
-                app.OnRequest += (sender, d) =>
+                var feeder = new CrawlerUrlFeeder(args.Skip(1).Select(s => new Uri(s)), database, int.Parse(args[0]));
+
+                feeder.OnError += (sender, eventArgs) => errors.Add(eventArgs);
+                feeder.OnProcessed += (sender, uri) => lastUri = uri;
+                feeder.OnEnqueue += (sender, l) => lastEnqueueCount = l;
+
+                var lastCount = (long)0;
+
+                timer.Elapsed += (sender, eventArgs) =>
                 {
-                    if (d["success"] % 10 == 0)
+                    var count = database.DistinctCount();
+                    var totalCount = database.TotalCount();
+                    var top10 = database.Top10();
+                    var throughPut = count - lastCount;
+
+                    lastCount = count;
+
+                    Console.Clear();
+                    Console.WriteLine($"Throughput:\t{throughPut} req/s");
+                    Console.WriteLine($"Distinct Count:\t{count}");
+                    Console.WriteLine($"Total Count:\t{totalCount}");
+                    Console.WriteLine($"Last Url:\t{lastUri}");
+                    Console.WriteLine($"Queue Count:\t{lastEnqueueCount}");
+                    Console.WriteLine($"Worker count:\t{feeder.GetCurrentWorkerCount() + 1}");
+                    Console.WriteLine();
+                    Console.WriteLine("Top10:");
+
+                    foreach (var l in top10)
                     {
-                        Console.Clear();
-                        Console.WriteLine("Requested {0} urls successfully and {1} failed", d["success"], d["failed"]);
-
-                        var totalPlaces = app.GetPlaces().Distinct().ToList();
-                        var errors = app.GetErrors().OrderByDescending(pair => pair.Value);
-                        var top10 = app.GetTop10();
-
-                        Console.WriteLine("Visited {0} distinct urls.", totalPlaces.Count);
-                        Console.WriteLine();
-                        Console.WriteLine("Error stats:");
-
-                        foreach (var error in errors)
-                        {
-                            Console.WriteLine("   {0}\t{1}", error.Value, error.Key);
-                        }
-
-                        Console.WriteLine();
-                        Console.WriteLine("Top 10:");
-                        top10.ForEach(result => Console.WriteLine(string.Join("", $"({result.Count})\t{result.Url}".Take(80))));
+                        Console.WriteLine($" ({l.Value})\t\t{l.Key}");
                     }
+
+                    Console.WriteLine();
+                    Console.WriteLine("Error stats:");
+
+                    errors
+                        .GroupBy(errorEventArgs => errorEventArgs.GetException().Message)
+                        .OrderByDescending(argses => argses.Count())
+                        .Take(5)
+                        .Select(argses => new
+                        {
+                            Count = argses.Count(),
+                            Exception = argses.ElementAt(0).GetException()
+                        })
+                        .ToList()
+                        .ForEach(obj => Console.WriteLine($" ({obj.Count})\t\t{obj.Exception.Message}"));
                 };
 
-                app.OnComplete += (sender, e) => Console.WriteLine("Done");
-                app.OnExhaustian += (sender, e) => Console.WriteLine("Exhausted");
-                app.OnStop += (sender, e) => Console.WriteLine("Stopped");
+                feeder.OnStart += (sender, eventArgs) => timer.Start();
 
-                Console.WriteLine(args);
-
-                app.Run(args[0]);
-
+                feeder.Start();
                 Console.ReadLine();
-
-                app.Stop();
-
-                Console.ReadLine();
+                feeder.Abort();
             }
             catch (Exception e)
-            {
-                //Console.WriteLine(e);
-                //Console.ReadLine();
+            {                
+                throw;
             }
         }
     }
